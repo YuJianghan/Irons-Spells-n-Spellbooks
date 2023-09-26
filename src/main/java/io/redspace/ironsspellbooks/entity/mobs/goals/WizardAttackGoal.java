@@ -41,6 +41,7 @@ public class WizardAttackGoal extends Goal {
 
     protected boolean isFlying;
     protected boolean shouldFlee;
+    protected int fleeCooldown;
 
     protected final ArrayList<AbstractSpell> attackSpells = new ArrayList<>();
     protected final ArrayList<AbstractSpell> defenseSpells = new ArrayList<>();
@@ -184,17 +185,14 @@ public class WizardAttackGoal extends Goal {
         handleAttackLogic(distanceSquared);
 
         singleUseDelay--;
-
     }
 
     protected void handleAttackLogic(double distanceSquared) {
         if (--this.attackTime == 0) {
-
+            resetAttackTimer(distanceSquared);
             if (!mob.isCasting() && !mob.isDrinkingPotion()) {
                 doSpellAction();
             }
-
-            resetAttackTimer(distanceSquared);
             //irons_spellbooks.LOGGER.debug("WizardAttackGoal.tick.2: attackTime.1: {}", attackTime);
         } else if (this.attackTime < 0) {
             this.attackTime = Mth.floor(Mth.lerp(Math.sqrt(distanceSquared) / (double) this.attackRadius, (double) this.attackIntervalMin, (double) this.attackIntervalMax));
@@ -218,7 +216,7 @@ public class WizardAttackGoal extends Goal {
         mob.lookAt(target, 30, 30);
         //make distance (flee), move into range, or strafe around
         float fleeDist = .275f;
-        if (shouldFlee && distanceSquared < attackRadiusSqr * (fleeDist * fleeDist)) {
+        if (shouldFlee && --fleeCooldown <= 0 && distanceSquared < attackRadiusSqr * (fleeDist * fleeDist)) {
             Vec3 flee = DefaultRandomPos.getPosAway(this.mob, 16, 7, target.position());
             if (flee != null) {
                 this.mob.getNavigation().moveTo(flee.x, flee.y, flee.z, speed * 1.5);
@@ -277,14 +275,19 @@ public class WizardAttackGoal extends Goal {
         if (!mob.hasUsedSingleAttack && singleUseSpell != SpellRegistry.none() && singleUseDelay <= 0) {
             mob.hasUsedSingleAttack = true;
             mob.initiateCastSpell(singleUseSpell, singleUseLevel);
+            fleeCooldown = 7 + singleUseSpell.getCastTime(singleUseLevel);
         } else {
             var spell = getNextSpellType();
             int spellLevel = (int) (spell.getMaxLevel() * Mth.lerp(mob.getRandom().nextFloat(), minSpellQuality, maxSpellQuality));
             spellLevel = Math.max(spellLevel, 1);
 
-            //Make sure cast is valid
-            if (!spell.shouldAIStopCasting(spellLevel, mob, target))
+            //Make sure cast is valid. if not, try again shortly
+            if (!spell.shouldAIStopCasting(spellLevel, mob, target)) {
                 mob.initiateCastSpell(spell, spellLevel);
+                fleeCooldown = 7 + spell.getCastTime(spellLevel);
+            } else {
+                attackTime = 5;
+            }
         }
     }
 

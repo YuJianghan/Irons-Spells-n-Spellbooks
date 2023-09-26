@@ -1,10 +1,14 @@
 package io.redspace.ironsspellbooks.entity.mobs.necromancer;
 
 import io.redspace.ironsspellbooks.api.registry.SpellRegistry;
+import io.redspace.ironsspellbooks.entity.mobs.SupportMob;
 import io.redspace.ironsspellbooks.entity.mobs.abstract_spell_casting_mob.AbstractSpellCastingMob;
+import io.redspace.ironsspellbooks.entity.mobs.goals.FindSupportableTargetGoal;
 import io.redspace.ironsspellbooks.entity.mobs.goals.WizardAttackGoal;
 import io.redspace.ironsspellbooks.entity.mobs.goals.WizardRecoverGoal;
+import io.redspace.ironsspellbooks.entity.mobs.goals.WizardSupportGoal;
 import io.redspace.ironsspellbooks.registries.ItemRegistry;
+import io.redspace.ironsspellbooks.util.ModTags;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
@@ -28,23 +32,26 @@ import net.minecraft.world.level.ServerLevelAccessor;
 import javax.annotation.Nullable;
 import java.util.List;
 
-public class NecromancerEntity extends AbstractSpellCastingMob implements Enemy {
+public class NecromancerEntity extends AbstractSpellCastingMob implements Enemy, SupportMob {
 
     public NecromancerEntity(EntityType<? extends AbstractSpellCastingMob> pEntityType, Level pLevel) {
         super(pEntityType, pLevel);
         xpReward = 15;
     }
 
+    public GoalSelector supportTargetSelector;
+
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(2, new RestrictSunGoal(this));
         this.goalSelector.addGoal(3, new FleeSunGoal(this, 1.0D));
+        this.goalSelector.addGoal(3, new WizardSupportGoal<>(this, 1.1f, 60));
         this.goalSelector.addGoal(4, new WizardAttackGoal(this, 1.25f, 35, 80)
                 .setSpells(
                         List.of(SpellRegistry.FANG_STRIKE_SPELL.get(), SpellRegistry.ICICLE_SPELL.get(), SpellRegistry.MAGIC_MISSILE_SPELL.get()),
-                        List.of(SpellRegistry.FANG_WARD_SPELL.get(), SpellRegistry.FORTIFY_SPELL.get()),
+                        List.of(SpellRegistry.FANG_WARD_SPELL.get()),
                         List.of(),
-                        List.of(SpellRegistry.BLIGHT_SPELL.get())
+                        List.of(SpellRegistry.BLIGHT_SPELL.get(), SpellRegistry.ROOT_SPELL.get())
                 )
                 .setSingleUseSpell(SpellRegistry.RAISE_DEAD_SPELL.get(), 80, 350, 4, 5)
                 .setDrinksPotions());
@@ -58,6 +65,11 @@ public class NecromancerEntity extends AbstractSpellCastingMob implements Enemy 
         this.targetSelector.addGoal(3, new NearestAttackableTargetGoal<>(this, IronGolem.class, true));
         this.targetSelector.addGoal(3, new NearestAttackableTargetGoal<>(this, Turtle.class, 10, true, false, Turtle.BABY_ON_LAND_SELECTOR));
 
+        this.supportTargetSelector = new GoalSelector(this.level.getProfilerSupplier());
+        this.supportTargetSelector.addGoal(0, new FindSupportableTargetGoal<>(this, LivingEntity.class, true,
+                //todo: check for summons and aggro
+                (mob) -> mob.getHealth() * 1.25f < mob.getMaxHealth() && (mob.getMobType() == MobType.UNDEAD))
+        );
         //this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, Player.class, 8.0F));
         //this.goalSelector.addGoal(6, new RandomLookAroundGoal(this));
     }
@@ -122,4 +134,16 @@ public class NecromancerEntity extends AbstractSpellCastingMob implements Enemy 
                 .add(Attributes.MOVEMENT_SPEED, .25);
     }
 
+    LivingEntity supportTarget;
+
+    @org.jetbrains.annotations.Nullable
+    @Override
+    public LivingEntity getSupportTarget() {
+        return supportTarget;
+    }
+
+    @Override
+    public void setSupportTarget(LivingEntity target) {
+        supportTarget = target;
+    }
 }

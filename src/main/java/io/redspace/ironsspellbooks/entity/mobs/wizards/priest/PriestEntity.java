@@ -1,5 +1,7 @@
 package io.redspace.ironsspellbooks.entity.mobs.wizards.priest;
 
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Sets;
 import io.redspace.ironsspellbooks.IronsSpellbooks;
 import io.redspace.ironsspellbooks.api.registry.SpellRegistry;
 import io.redspace.ironsspellbooks.entity.mobs.SupportMob;
@@ -9,13 +11,22 @@ import io.redspace.ironsspellbooks.entity.mobs.goals.*;
 import io.redspace.ironsspellbooks.api.registry.AttributeRegistry;
 import io.redspace.ironsspellbooks.registries.ItemRegistry;
 import io.redspace.ironsspellbooks.util.ModTags;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import net.minecraft.Util;
+import net.minecraft.advancements.CriteriaTriggers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.stats.Stats;
+import net.minecraft.tags.TagKey;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.DifficultyInstance;
 import net.minecraft.world.InteractionHand;
@@ -33,22 +44,31 @@ import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.entity.ai.targeting.TargetingConditions;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.Enemy;
-import net.minecraft.world.entity.npc.VillagerData;
-import net.minecraft.world.entity.npc.VillagerDataHolder;
-import net.minecraft.world.entity.npc.VillagerProfession;
-import net.minecraft.world.entity.npc.VillagerType;
+import net.minecraft.world.entity.npc.*;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.MapItem;
+import net.minecraft.world.item.alchemy.PotionUtils;
+import net.minecraft.world.item.alchemy.Potions;
+import net.minecraft.world.item.trading.Merchant;
+import net.minecraft.world.item.trading.MerchantOffer;
+import net.minecraft.world.item.trading.MerchantOffers;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.pathfinder.PathFinder;
 import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
+import net.minecraft.world.level.saveddata.maps.MapDecoration;
+import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
 import java.util.List;
+import java.util.Set;
 
-public class PriestEntity extends NeutralWizard implements VillagerDataHolder, SupportMob, HomeOwner {
+public class PriestEntity extends NeutralWizard implements VillagerDataHolder, SupportMob, HomeOwner, Merchant {
     private static final EntityDataAccessor<VillagerData> DATA_VILLAGER_DATA = SynchedEntityData.defineId(PriestEntity.class, EntityDataSerializers.VILLAGER_DATA);
     private static final EntityDataAccessor<Boolean> DATA_VILLAGER_UNHAPPY = SynchedEntityData.defineId(PriestEntity.class, EntityDataSerializers.BOOLEAN);
     public GoalSelector supportTargetSelector;
@@ -216,8 +236,24 @@ public class PriestEntity extends NeutralWizard implements VillagerDataHolder, S
 
     @Override
     protected InteractionResult mobInteract(Player pPlayer, InteractionHand pHand) {
-        setUnhappy();
-        return super.mobInteract(pPlayer, pHand);
+        //TODO: player needs to meet some reputation condition?
+        //setUnhappy();
+        boolean preventTrade = this.getOffers().isEmpty() || this.getTarget() != null || isAngryAt(pPlayer);
+        if (pHand == InteractionHand.MAIN_HAND) {
+            if (preventTrade && !this.level.isClientSide) {
+                this.setUnhappy();
+            }
+        }
+        if (preventTrade) {
+            return InteractionResult.sidedSuccess(this.level.isClientSide);
+        } else {
+            if (!this.level.isClientSide && !this.offers.isEmpty()) {
+                this.startTrading(pPlayer);
+            }
+
+            return InteractionResult.sidedSuccess(this.level.isClientSide);
+        }
+        //return super.mobInteract(pPlayer, pHand);
     }
 
     public void setUnhappy() {
@@ -228,6 +264,9 @@ public class PriestEntity extends NeutralWizard implements VillagerDataHolder, S
         }
     }
 
+    /*
+     * Homeowner implementation
+     */
     BlockPos homePos;
 
     @org.jetbrains.annotations.Nullable
@@ -253,7 +292,164 @@ public class PriestEntity extends NeutralWizard implements VillagerDataHolder, S
         deserializeHome(this, pCompound);
     }
 
+    /*
+     * Merchant implementation
+     */
+    @Nullable
+    private Player tradingPlayer;
+    @Nullable
+    protected MerchantOffers offers;
 
+    @Override
+    public void setTradingPlayer(@org.jetbrains.annotations.Nullable Player pTradingPlayer) {
+        this.tradingPlayer = pTradingPlayer;
+    }
+
+    @org.jetbrains.annotations.Nullable
+    @Override
+    public Player getTradingPlayer() {
+        return tradingPlayer;
+    }
+
+    Int2ObjectMap<VillagerTrades.ItemListing[]> trades = new Int2ObjectOpenHashMap<>(ImmutableMap.of(
+            1, new VillagerTrades.ItemListing[]{
+                    new VillagerTrades.EmeraldForItems(Items.ROTTEN_FLESH, 32, 16, 2),
+                    new VillagerTrades.ItemsForEmeralds(Items.REDSTONE, 1, 2, 1)
+            },
+            2, new VillagerTrades.ItemListing[]{
+                    new VillagerTrades.EmeraldForItems(Items.GOLD_INGOT, 3, 12, 10),
+                    new VillagerTrades.ItemsForEmeralds(Items.LAPIS_LAZULI, 1, 1, 5)
+            },
+            3, new VillagerTrades.ItemListing[]{
+                    new VillagerTrades.EmeraldForItems(Items.RABBIT_FOOT, 2, 12, 20),
+                    new VillagerTrades.ItemsForEmeralds(Blocks.GLOWSTONE, 4, 1, 12, 10)
+            },
+            4, new VillagerTrades.ItemListing[]{
+                    new VillagerTrades.EmeraldForItems(Items.SCUTE, 4, 12, 30),
+                    new VillagerTrades.EmeraldForItems(Items.GLASS_BOTTLE, 9, 12, 30),
+                    new VillagerTrades.ItemsForEmeralds(Items.ENDER_PEARL, 5, 1, 15)
+            },
+            5, new VillagerTrades.ItemListing[]{
+                    new VillagerTrades.EmeraldForItems(Items.NETHER_WART, 22, 12, 30),
+                    new VillagerTrades.ItemsForEmeralds(Items.EXPERIENCE_BOTTLE, 3, 1, 30)
+            }
+    ));
+
+    @Override
+    public MerchantOffers getOffers() {
+        if (this.offers == null) {
+            this.offers = new MerchantOffers();
+            this.offers.add(new FastTreasureMapTrade(
+                    22,
+                    ModTags.PRIEST_WAR_MAP,
+                    "item.irons_spellbooks.priest_war_map",
+                    MapDecoration.Type.RED_X,
+                    1,
+                    0
+            ).getOffer(this, this.random));
+            this.offers.add(new MerchantOffer(
+                    new ItemStack(ItemRegistry.GREATER_HEALING_POTION.get()),
+                    new ItemStack(Items.EMERALD, 18),
+                    3,
+                    0,
+                    0.2F
+            ));
+            this.offers.add(new MerchantOffer(
+                    new ItemStack(Items.EMERALD, 6),
+                    PotionUtils.setPotion(new ItemStack(Items.POTION), Potions.HEALING),
+                    2,
+                    0,
+                    0.2F
+            ));
+
+            //this.addOffersFromItemListings(offers, trades.get(1), 5);
+            //this.updateTrades();
+        }
+
+        return this.offers;
+    }
+
+    protected void addOffersFromItemListings(MerchantOffers pGivenMerchantOffers, VillagerTrades.ItemListing[] pNewTrades, int pMaxNumbers) {
+        Set<Integer> set = Sets.newHashSet();
+        if (pNewTrades.length > pMaxNumbers) {
+            while (set.size() < pMaxNumbers) {
+                set.add(this.random.nextInt(pNewTrades.length));
+            }
+        } else {
+            for (int i = 0; i < pNewTrades.length; ++i) {
+                set.add(i);
+            }
+        }
+
+        for (Integer integer : set) {
+            VillagerTrades.ItemListing villagertrades$itemlisting = pNewTrades[integer];
+            MerchantOffer merchantoffer = villagertrades$itemlisting.getOffer(this, this.random);
+            if (merchantoffer != null) {
+                pGivenMerchantOffers.add(merchantoffer);
+            }
+        }
+
+    }
+
+    @Override
+    public void overrideOffers(MerchantOffers pOffers) {
+
+    }
+
+    public boolean isTrading() {
+        return this.tradingPlayer != null;
+    }
+
+    @Override
+    protected boolean isImmobile() {
+        return super.isImmobile() || isTrading();
+    }
+
+    @Override
+    public void notifyTrade(MerchantOffer pOffer) {
+        pOffer.increaseUses();
+        this.ambientSoundTime = -this.getAmbientSoundInterval();
+        //this.rewardTradeXp(pOffer);
+    }
+
+    @Override
+    public void notifyTradeUpdated(ItemStack pStack) {
+        if (!this.level.isClientSide && this.ambientSoundTime > -this.getAmbientSoundInterval() + 20) {
+            this.ambientSoundTime = -this.getAmbientSoundInterval();
+            //this.playSound(this.getTradeUpdatedSound(!pStack.isEmpty()), this.getSoundVolume(), this.getVoicePitch());
+        }
+    }
+
+    private void startTrading(Player pPlayer) {
+        this.setTradingPlayer(pPlayer);
+        this.lookAt(pPlayer, 360, 360);
+        this.openTradingScreen(pPlayer, this.getDisplayName(), this.getVillagerData().getLevel());
+    }
+
+    @Override
+    public int getVillagerXp() {
+        return 0;
+    }
+
+    @Override
+    public void overrideXp(int pXp) {
+
+    }
+
+    @Override
+    public boolean showProgressBar() {
+        return false;
+    }
+
+    @Override
+    public SoundEvent getNotifyTradeSound() {
+        return null;
+    }
+
+    @Override
+    public boolean isClientSide() {
+        return this.level.isClientSide;
+    }
 
     /*
     Brain Testing
