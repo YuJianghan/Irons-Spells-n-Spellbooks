@@ -410,12 +410,12 @@ public class ServerPlayerEvents {
         var mob = event.getEntity();
         //Attributes should never be null because all living entities have these attributes
         if(mob.getMobType() == MobType.UNDEAD){
-            //Undead take 200% holy damage, and 50% blood (necromantic) damage
+            //Undead take 50% more holy damage, and 50% less blood (necromantic) damage
             mob.getAttributes().getInstance(AttributeRegistry.HOLY_MAGIC_RESIST.get()).setBaseValue(0.5);
             mob.getAttributes().getInstance(AttributeRegistry.BLOOD_MAGIC_RESIST.get()).setBaseValue(1.5);
         }
         if(mob.fireImmune()){
-            //Fire immune (blazes, pyromancer, etc) take 50% fire damage
+            //Fire immune (blazes, pyromancer, etc) take 50% less fire damage
             mob.getAttributes().getInstance(AttributeRegistry.FIRE_MAGIC_RESIST.get()).setBaseValue(1.5);
         }
     }
