@@ -44,6 +44,7 @@ import net.minecraft.world.damagesource.IndirectEntityDamageSource;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.MobType;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -401,6 +402,21 @@ public class ServerPlayerEvents {
 //                    serverPlayer.addEffect(new MobEffectInstance(MobEffectRegistry.ENCHANTED_WARD.get(), 40, 0, false, false, false));
 
             }
+        }
+    }
+
+    @SubscribeEvent
+    public static void handleResistanceAttributesOnSpawn(LivingSpawnEvent event){
+        var mob = event.getEntity();
+        //Attributes should never be null because all living entities have these attributes
+        if(mob.getMobType() == MobType.UNDEAD){
+            //Undead take 200% holy damage, and 50% blood (necromantic) damage
+            mob.getAttributes().getInstance(AttributeRegistry.HOLY_MAGIC_RESIST.get()).setBaseValue(0.5);
+            mob.getAttributes().getInstance(AttributeRegistry.BLOOD_MAGIC_RESIST.get()).setBaseValue(1.5);
+        }
+        if(mob.fireImmune()){
+            //Fire immune (blazes, pyromancer, etc) take 50% fire damage
+            mob.getAttributes().getInstance(AttributeRegistry.FIRE_MAGIC_RESIST.get()).setBaseValue(1.5);
         }
     }
 }
