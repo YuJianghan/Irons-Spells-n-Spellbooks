@@ -11,7 +11,6 @@ import io.redspace.ironsspellbooks.api.registry.SpellRegistry;
 import io.redspace.ironsspellbooks.config.ServerConfigs;
 import io.redspace.ironsspellbooks.api.item.curios.RingData;
 import io.redspace.ironsspellbooks.damage.DamageSources;
-import io.redspace.ironsspellbooks.damage.ISpellDamageSource;
 import io.redspace.ironsspellbooks.network.ClientboundSyncMana;
 import io.redspace.ironsspellbooks.network.ClientboundUpdateCastingState;
 import io.redspace.ironsspellbooks.network.spell.ClientboundOnCastFinished;
@@ -484,6 +483,10 @@ public abstract class AbstractSpell {
         return SpellRarity.COMMON;
     }
 
+    public DamageSource getDamageSource() {
+        return new DamageSource(getDeathMessageId());
+    }
+
     public String getDeathMessageId() {
         if (deathMessageId == null) {
             deathMessageId = getSpellId().replace(':', '.');
@@ -492,16 +495,12 @@ public abstract class AbstractSpell {
         return deathMessageId;
     }
 
-    public DamageSource getDamageSource() {
-        return (DamageSource) ISpellDamageSource.source(this, null, null);
-    }
-
     public DamageSource getDamageSource(Entity attacker) {
-        return (DamageSource) ISpellDamageSource.source(this, attacker, null);
+        return DamageSources.directDamageSource(getDamageSource(), attacker);
     }
 
     public DamageSource getDamageSource(Entity projectile, Entity attacker) {
-        return (DamageSource) ISpellDamageSource.source(this, attacker, projectile);
+        return DamageSources.indirectDamageSource(getDamageSource(), projectile, attacker);
     }
 
     public boolean isEnabled() {
